@@ -2,75 +2,89 @@
 
 
 
-A beginner-friendly embedded software project using C/C++, FreeRTOS, and Python.
+A beginner-friendly embedded software project for monitoring and controlling a simulated energy supply system.
 
 
 
-\## Project Goal
+\## Project Overview
 
 
 
-The project simulates the monitoring and control of an energy supply system.
+The project demonstrates a small task-based embedded control application using C/C++ and FreeRTOS.
 
 
 
-The system will:
+The system simulates voltage, current, and temperature measurements and evaluates different operating and fault conditions.
 
 
 
-\- Read simulated voltage, current, and temperature values
-
-\- Process sensor data using FreeRTOS tasks
-
-\- Detect NORMAL, WARNING, and FAULT conditions
-
-\- Provide system status information
-
-\- Use Python for simulation and test scenarios
+\## System Architecture
 
 
 
-\## Technologies
+The application consists of three FreeRTOS tasks:
 
 
 
-\- C/C++
+\- SensorTask - generates simulated sensor measurements
 
-\- FreeRTOS
+\- ControlTask - evaluates sensor values and determines the system state
 
-\- Python
-
-\- Git
+\- StatusTask - reports the current system condition
 
 
 
-\## Current Status
+The controller uses three main states:
 
 
 
-\- FreeRTOS Windows simulator configured
+\- NORMAL
 
-\- Sensor task implemented
+\- WARNING
 
-\- SensorData structure implemented
-
-\- Basic control state logic implemented
+\- FAULT
 
 
 
-\## Planned Features
+\## Simulation Scenarios
 
 
 
-\- Control task
+The system currently simulates:
 
-\- State-based control logic
 
-\- Status task
 
-\- Python simulation tool
+\- Normal operation
 
-\- Functional test scenarios
+\- High temperature
 
-\- Debugging and error analysis
+\- Overcurrent
+
+\- Overvoltage
+
+\- Critical combined fault condition
+
+
+
+\## Python Test Tool
+
+
+
+A Python-based simulation and validation script provides predefined test scenarios and compares expected and calculated system states.
+
+
+
+Example result:
+
+
+
+```text
+
+Scenario: HIGH TEMPERATURE
+
+Expected: WARNING
+
+Actual: WARNING
+
+Result: PASS
 
