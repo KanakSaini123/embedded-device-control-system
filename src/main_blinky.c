@@ -13,16 +13,9 @@
 #include "semphr.h"
 #include "SensorData.h"
 #include "SystemState.h"
+#include "NetworkManager.h"
 
 
-typedef enum
-{
-    SCENARIO_NORMAL,
-    SCENARIO_HIGH_TEMPERATURE,
-    SCENARIO_OVERCURRENT,
-    SCENARIO_OVERVOLTAGE,
-    SCENARIO_CRITICAL
-} SimulationScenario;
 
 /* Priorities at which the tasks are created. */
 #define mainQUEUE_RECEIVE_TASK_PRIORITY    ( tskIDLE_PRIORITY + 2 )
@@ -47,22 +40,21 @@ typedef enum
 
 /*-----------------------------------------------------------*/
 
-/*
- * The tasks as described in the comments at the top of this file.
- */
-// static void prvQueueReceiveTask( void * pvParameters );
 static void SensorTask( void * pvParameters );   // SensorTask
 static void ControlTask(void* pvParameters);
+static void NetworkTask(void* pvParameters);
 static const char* getStateName(SystemState state);
 static void StatusTask(void* pvParameters);
-static SensorData sensorData;
+static SensorData sensorData =
+{
+    24.0f,
+    3.0f,
+    40.0f
+};
 static SystemState systemState = STATE_STARTUP;
-static const char* getScenarioName(SimulationScenario scenario);
-static SimulationScenario currentScenario = SCENARIO_NORMAL;
-/*
- * The callback function executed when the software timer expires.
- */
+static volatile int newSensorData = 0;
 static void prvQueueSendTimerCallback( TimerHandle_t xTimerHandle );
+
 
 /*-----------------------------------------------------------*/
 
@@ -106,6 +98,14 @@ void main_blinky( void )
             tskIDLE_PRIORITY + 1,
             NULL
         );
+        xTaskCreate(
+            NetworkTask,
+            "NetworkTask",
+            configMINIMAL_STACK_SIZE,
+            NULL,
+            tskIDLE_PRIORITY + 1,
+            NULL
+        );
         /* Create the software timer, but don't start it yet. */
         xTimer = xTimerCreate( "Timer",                     /* The text name assigned to the software timer - for debug only as it is not used by the kernel. */
                                xTimerPeriod,                /* The period of the software timer in ticks. */
@@ -129,30 +129,69 @@ void main_blinky( void )
     }
 }
 /*-----------------------------------------------------------*/
-
-static const char* getScenarioName(SimulationScenario scenario)
+static void NetworkTask(void* pvParameters)
 {
-    switch (scenario)
+    char buffer[512];
+
+    (void)pvParameters;
+
+    printf("[NETWORK] Starting network task...\r\n");
+
+    if (NetworkManager_Initialize() == 0)
     {
-    case SCENARIO_NORMAL:
-        return "NORMAL";
+        printf("[NETWORK] Initialization failed.\r\n");
 
-    case SCENARIO_HIGH_TEMPERATURE:
-        return "HIGH TEMPERATURE";
+        for (; ; )
+        {
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+    }
 
-    case SCENARIO_OVERCURRENT:
-        return "OVERCURRENT";
+    for (; ; )
+    {
+        if (NetworkManager_WaitForClient() == 0)
+        {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
 
-    case SCENARIO_OVERVOLTAGE:
-        return "OVERVOLTAGE";
+        for (; ; )
+        {
+            int bytesReceived;
 
-    case SCENARIO_CRITICAL:
-        return "CRITICAL";
+            bytesReceived = NetworkManager_Receive(
+                buffer,
+                sizeof(buffer)
+            );
 
-    default:
-        return "UNKNOWN";
+            if (bytesReceived <= 0)
+            {
+                printf("[NETWORK] Python client disconnected.\r\n");
+                break;
+            }
+
+            printf(
+                "[NETWORK] Received: %s\r\n",
+                buffer
+            );
+
+            if (NetworkManager_ParseSensorData(
+                buffer,
+                &sensorData))
+            {
+                printf(
+                    "[NETWORK] SensorData updated: %.1f V | %.1f A | %.1f C\r\n",
+                    sensorData.voltage,
+                    sensorData.current,
+                    sensorData.temperature
+                );
+
+                newSensorData = 1;
+            }
+        }
     }
 }
+
 static const char* getStateName(SystemState state)
 {
     switch (state)
@@ -192,116 +231,60 @@ static void StatusTask(void* pvParameters)
 
 static void ControlTask(void* pvParameters)
 {
-
     (void)pvParameters;
-
-    systemState = STATE_STARTUP;
 
     for (; ; )
     {
-        if (sensorData.temperature >= 80.0f ||
-            sensorData.current >= 8.0f ||
-            sensorData.voltage >= 30.0f)
+        if (newSensorData == 1)
         {
-            systemState = STATE_FAULT;
-        }
-        else if (sensorData.temperature >= 60.0f ||
-            sensorData.current > 5.0f ||
-            sensorData.voltage > 26.0f)
-        {
-            systemState = STATE_WARNING;
-        }
-        else
-        {
-            systemState = STATE_NORMAL;
+            if (sensorData.temperature >= 80.0f ||
+                sensorData.current >= 9.0f ||
+                sensorData.voltage >= 31.0f)
+            {
+                systemState = STATE_FAULT;
+            }
+            else if (sensorData.temperature >= 60.0f ||
+                sensorData.current >= 5.0f ||
+                sensorData.voltage >= 26.0f)
+            {
+                systemState = STATE_WARNING;
+            }
+            else
+            {
+                systemState = STATE_NORMAL;
+            }
+
+            printf(
+                "[CONTROL] State: %s\r\n",
+                getStateName(systemState)
+            );
+
+            NetworkManager_SendState(systemState);
+
+            newSensorData = 0;
         }
 
-        printf("[CONTROL] State: %s\r\n", getStateName(systemState));
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
-
 
 
 static void SensorTask( void * pvParameters )
 {
-    int cycle = 0;
-    (void)pvParameters;
+        (void)pvParameters;
 
-    for (; ; )
-    {
-        if (cycle < 5)
+        for (; ; )
         {
-            currentScenario = SCENARIO_NORMAL;
+            printf(
+                "[SENSOR] Voltage: %.1f V | Current: %.1f A | Temperature: %.1f C\r\n",
+                sensorData.voltage,
+                sensorData.current,
+                sensorData.temperature
+            );
+
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
-        else if (cycle < 10)
-        {
-            currentScenario = SCENARIO_HIGH_TEMPERATURE;
-        }
-        else if (cycle < 15)
-        {
-            currentScenario = SCENARIO_OVERCURRENT;
-        }
-        else if (cycle < 20)
-        {
-            currentScenario = SCENARIO_OVERVOLTAGE;
-        }
-        else
-        {
-            currentScenario = SCENARIO_CRITICAL;
-        }
-
-        switch (currentScenario)
-        {
-        case SCENARIO_NORMAL:
-            sensorData.voltage = 24.0f;
-            sensorData.current = 3.0f;
-            sensorData.temperature = 40.0f;
-            break;
-
-        case SCENARIO_HIGH_TEMPERATURE:
-            sensorData.voltage = 24.0f;
-            sensorData.current = 3.0f;
-            sensorData.temperature = 70.0f;
-            break;
-
-        case SCENARIO_OVERCURRENT:
-            sensorData.voltage = 24.0f;
-            sensorData.current = 8.0f;
-            sensorData.temperature = 65.0f;
-            break;
-
-        case SCENARIO_OVERVOLTAGE:
-            sensorData.voltage = 30.0f;
-            sensorData.current = 3.0f;
-            sensorData.temperature = 45.0f;
-            break;
-
-        case SCENARIO_CRITICAL:
-            sensorData.voltage = 30.0f;
-            sensorData.current = 8.0f;
-            sensorData.temperature = 90.0f;
-            break;
-
-        default:
-            sensorData.voltage = 24.0f;
-            sensorData.current = 3.0f;
-            sensorData.temperature = 40.0f;
-            break;
-        }
-
-        printf(
-            "[SENSOR] Scenario: %s | Voltage: %.1f V | Current: %.1f A | Temperature: %.1f C\r\n",
-            getScenarioName(currentScenario),
-            sensorData.voltage,
-            sensorData.current,
-            sensorData.temperature
-        );
-        cycle++;
-        vTaskDelay(pdMS_TO_TICKS(1000));
     }
-}
 /*-----------------------------------------------------------*/
 
 static void prvQueueSendTimerCallback( TimerHandle_t xTimerHandle )

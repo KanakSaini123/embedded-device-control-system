@@ -1,3 +1,6 @@
+#ifndef SYSTEM_STATE_H
+#define SYSTEM_STATE_H
+
 typedef enum
 {
     STATE_STARTUP,
@@ -5,3 +8,5 @@ typedef enum
     STATE_WARNING,
     STATE_FAULT
 } SystemState;
+
+#endif
